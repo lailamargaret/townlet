@@ -298,13 +298,28 @@ def_priors.Village <- function(village) {
       df <- village$data |> select(donor, time, replicate, representation)
       df$i <- 1
 
-      if(village$sim == FALSE & nrow(df[df$time ==0,]) != village$num_reps) {
-        df_0 <- dplyr::bind_rows(replicate(village$num_reps, df[df$time ==0,], simplify = FALSE))
-        df_0$replicate <- rep(1:village$num_reps, each = village$num_donors)
-        df <- df[df$time != 0,]
+      # if(village$sim == FALSE & nrow(df[df$time ==0,]) != village$num_reps) {
+      #   df_0 <- dplyr::bind_rows(replicate(village$num_reps, df[df$time ==0,], simplify = FALSE))
+      #   df_0$replicate <- rep(1:village$num_reps, each = village$num_donors)
+      #   df <- df[df$time != 0,]
+      #   df <- rbind(df, df_0)
+      #   df <- df[order(df$time),]
+      # }
+      t0 <- df[df$time == 0, , drop = FALSE]
+
+      t0_already_has_replicates <- (
+        nrow(t0) == village$num_donors * village$num_reps &&
+          length(unique(t0$replicate)) == village$num_reps
+      )
+
+      if (!village$sim && !t0_already_has_replicates) {
+        df_0 <- dplyr::bind_rows(replicate(village$num_reps, t0, simplify = FALSE))
+        df_0$replicate <- rep(1:village$num_reps, each = nrow(t0))
+        df <- df[df$time != 0, , drop = FALSE]
         df <- rbind(df, df_0)
-        df <- df[order(df$time),]
+        df <- df[order(df$time, df$replicate), ]
       }
+
 
       data <- df |>
         select(i, time, replicate, donor, representation) |>
