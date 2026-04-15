@@ -51,6 +51,8 @@ init_village <- function(datapath, model=NULL, normalize=FALSE, outdir= './', na
   print('Checking data structure')
   village <- validate_village(village)
 
+
+
   if(is.null(village$color)) {
     cls <- c("#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E", "#E6AB02", "#A6761D", "#666666")
     village$color <- rep(cls, length.out = village$num_donors)
@@ -120,6 +122,7 @@ t0_checkrep.Village <- function(village) {
     ggsave(paste0(village$outdir, village$name, '_T0donor_representation.png'), bg = 'white', width = 5, height = 4, units = 'in')
   }
 
+
   village$num_T0lowdonors <- length(village$T0_lowdonors)
 
   if (village$num_T0lowdonors > 0) {
@@ -165,6 +168,8 @@ validate_village <- function(village) {
 #' @exportS3Method validate_village Village
 validate_village.Village <- function(village) {
 
+  ## Check outdir and name are type character
+  ## Create outdir
   if (!is.character(village$outdir) || length(village$outdir) != 1) {
     stop("Outdir attribute must be a single string", call. = FALSE)
   } else {
@@ -180,8 +185,10 @@ validate_village.Village <- function(village) {
     stop("Name attribute must be a single string", call. = FALSE)
   }
 
+  ## Read in df
   village$data <- read.csv(village$datapath)
 
+  ## check if user defined donor covariate(s) or treatment column to include in model
   if(!is.null(village$model)) {
     required_cols <- unlist(strsplit(village$model, "[~+]"))
     required_cols <- gsub("\\s", "", required_cols)
@@ -192,6 +199,7 @@ validate_village.Village <- function(village) {
     required_cols <- c()
   }
 
+  # check if all required columns are in df input
   required_cols <- c(c('donor', 'time', 'replicate', 'representation'), required_cols)
 
   missing_cols <- setdiff(required_cols, colnames(village$data))
@@ -202,6 +210,7 @@ validate_village.Village <- function(village) {
          call. = FALSE)
   }
 
+  ## check for treatments in village
   if(!is.null(village$predictors)) {
     village$treatcol <- village$predictors[startsWith(village$predictors, 'treatment_') & !grepl(':', village$predictors)]
   }
@@ -218,6 +227,8 @@ validate_village.Village <- function(village) {
                    paste(village$treatcol)),
              call. = FALSE)
       } else {
+        #%%%% Add number doses, doses and treatment name attributes %%%%
+        ### Add treatment_scaled columnn
         village$num_doses <- length(unique(village$data[[village$treatcol]]))
         village$doses <- unique(village$data[[village$treatcol]])
         village$treatment <- str_remove(village$treatcol, '.*\\_')
@@ -232,12 +243,16 @@ validate_village.Village <- function(village) {
     }
   }
 
+  ## check that all donors meet minimum representation threshold at T0
   village <- t0_checkrep(village)
 
+  ## donor name column and add donorid column
   if (!is.character(village$data$donor)) {
     stop("The 'donor' column must be type character", call. = FALSE)
   }
 
+  ## check for donor covariates included in data
+  #%%%% Add donor covariate(s) names and total number to attributes %%%%
   if(!is.null(village$predictors)) {
     village$donorcov <- village$predictors[!(village$predictors %in% village$treatcol)]
     village$donorcols <- village$donorcov[!grepl(":", village$donorcov)]
@@ -261,19 +276,24 @@ validate_village.Village <- function(village) {
     }
   }
 
+  ### time column (scale for running model)
   if (!(is.numeric(village$data$time) || is.integer(village$data$time))) {
     stop("The 'time' column must be type numeric", call. = FALSE)
   }
   village$data$time_scaled <- village$data$time/(max(village$data$time)/length(unique(village$data$time[village$data$time > 0])))
   warning(paste("New scaled time values for modeling growth rates:",
                 paste(sort(unique(village$data$time_scaled)), collapse = ", ")))
+  #%%%% Add number sample time points (excluding T0) attribute %%%%
   village$num_timepts <- length(unique(village$data$time_scaled[village$data$time_scaled > 0]))
 
+  ### replicate column
   if (!all(village$data$replicate %% 1 == 0)) {
     stop("The 'replicate' column must be type integer", call. = FALSE)
   }
+  #%%%% Add number replicates attribute %%%%
   village$num_reps <- max(village$data$replicate)
 
+  ## Check if treatment time points have same number of replicates
   groupcols <- c('time', 'donor', village$treatcol)
   village$ckreps <- village$data |> group_by(!!!syms(groupcols)) |> summarise(reps = length(replicate), .groups = "keep")
 
@@ -289,13 +309,16 @@ validate_village.Village <- function(village) {
     warning('Different number of replicates per treatment or sample time points. Inspect number of replicates for each sample by calling View(village$ckreps)')
   }
 
+  ## arrange columns by time, replicate & treatment group
   cols <- c('time', 'replicate', 'donorid', village$treatcol)
   village$data <- village$data |> arrange(!!!syms(cols))
   rownames(village$data) <- NULL
 
+  ### Add sample column
   groupcols <- c('time_scaled', 'replicate', village$treatcol)
   village$data <- village$data |> group_by(!!!syms(groupcols)) |> mutate(sample=cur_group_id())
 
+  ### donor representation numeric and sums to 1
   if (!is.numeric(village$data$representation)) {
     stop("The 'representation' column must be type numeric", call. = FALSE)
   }
@@ -332,6 +355,7 @@ baseline_donor <- function(village) {
 #' @exportS3Method baseline_donor Village
 baseline_donor.Village <- function(village) {
 
+  # Define donors with median growth (alternative baseline donors)
   df_meddonors <- village$data
 
   if (length(village$treatcol) == 1) {
@@ -341,9 +365,8 @@ baseline_donor.Village <- function(village) {
 
     result <- df_meddonors |>
       group_by(replicate) |>
-      summarise(unique_times = list(unique(time))) |>
-      ungroup() |>
-      summarise(common_min = max(sapply(unique_times, min)))
+      summarise(unique_times = list(unique(time)), .groups = "drop") |>
+      summarise(common_min = max(sapply(unique_times, min)), .groups = "drop")
 
     df_meddonors <- df_meddonors |>
       group_by(donor, replicate, !!!syms(village$donorcols)) |>
@@ -364,9 +387,8 @@ baseline_donor.Village <- function(village) {
 
     result <- df_meddonors |>
       group_by(replicate) |>
-      summarise(unique_times = list(unique(time))) |>
-      ungroup() |>
-      summarise(common_min = max(sapply(unique_times, min)))
+      summarise(unique_times = list(unique(time)), .groups = "drop") |>
+      summarise(common_min = max(sapply(unique_times, min)), .groups = "drop")
 
     df_meddonors <- df_meddonors |>
       group_by(donor, replicate, !!!syms(village$donorcols)) |>
@@ -395,15 +417,16 @@ baseline_donor.Village <- function(village) {
   df_meddonors <- df_meddonors[order(df_meddonors$median_gr), ]
   village$alt_baseline <- df_meddonors$donor[1:10]
 
-  if(is.null(village$baseline)){
+  # Set default baseline donor and restructure data
+  if (is.null(village$baseline)) {
     village$baseline <- df_meddonors$donor[1]
   }
   data_reset <- village$data[village$data$donor != village$baseline, ]
   data_reset <- data_reset |>
     group_by(donor) |>
-    mutate(donorid=cur_group_id()) |>
+    mutate(donorid = cur_group_id()) |>
     ungroup()
-  village$data <- village$data[village$data$donor == village$baseline,]
+  village$data <- village$data[village$data$donor == village$baseline, ]
   village$data$donorid <- village$num_donors
 
   village$data <- rbind(data_reset, village$data)
