@@ -355,10 +355,8 @@ baseline_donor <- function(village) {
 #' @exportS3Method baseline_donor Village
 baseline_donor.Village <- function(village) {
 
-  # Define donors with median growth (alternative baseline donors)
   df_meddonors <- village$data
 
-  ### Fix this later
   if (length(village$treatcol) == 1) {
 
     df_meddonors <- df_meddonors |>
@@ -370,9 +368,20 @@ baseline_donor.Village <- function(village) {
       ungroup() |>
       summarise(common_min = max(sapply(unique_times, min)))
 
-    df_meddonors <- df_meddonors |> group_by(donor, replicate, !!!syms(village$donorcols)) |>
-      summarise(gr=abs(representation[time == max(time)]-representation[time == result$common_min])) |>
-      ungroup()
+    df_meddonors <- df_meddonors |>
+      group_by(donor, replicate, !!!syms(village$donorcols)) |>
+      summarise(
+        gr = {
+          x1 <- representation[time == max(time)]
+          x0 <- representation[time == result$common_min]
+          if (length(x1) == 0 || length(x0) == 0) {
+            NA_real_
+          } else {
+            abs(x1[1] - x0[1])
+          }
+        },
+        .groups = "drop"
+      )
 
   } else {
 
@@ -382,30 +391,44 @@ baseline_donor.Village <- function(village) {
       ungroup() |>
       summarise(common_min = max(sapply(unique_times, min)))
 
-    df_meddonors <- df_meddonors |> group_by(donor, replicate, !!!syms(village$donorcols)) |>
-      summarise(gr=abs(representation[time == max(time)]-representation[time == result$common_min])) |>
-      ungroup()
+    df_meddonors <- df_meddonors |>
+      group_by(donor, replicate, !!!syms(village$donorcols)) |>
+      summarise(
+        gr = {
+          x1 <- representation[time == max(time)]
+          x0 <- representation[time == result$common_min]
+          if (length(x1) == 0 || length(x0) == 0) {
+            NA_real_
+          } else {
+            abs(x1[1] - x0[1])
+          }
+        },
+        .groups = "drop"
+      )
   }
-
 
   df_meddonors <- df_meddonors |>
     group_by(donor, !!!syms(village$donorcols)) |>
-    summarise(sumdiff= sum(gr)) |>
+    summarise(sumdiff = sum(gr, na.rm = TRUE), .groups = "drop") |>
     arrange(sumdiff)
 
   med <- median(df_meddonors$sumdiff)
 
-  df_meddonors$median_gr <- abs(df_meddonors$sumdiff-med)
-  df_meddonors <- df_meddonors[order(df_meddonors$median_gr),]
+  df_meddonors$median_gr <- abs(df_meddonors$sumdiff - med)
+  df_meddonors <- df_meddonors[order(df_meddonors$median_gr), ]
   village$alt_baseline <- df_meddonors$donor[1:10]
 
-  # Set default baseline donor and restructure data
-  if(is.null(village$baseline)){
+  if (is.null(village$baseline)) {
     village$baseline <- df_meddonors$donor[1]
   }
+
   data_reset <- village$data[village$data$donor != village$baseline, ]
-  data_reset <- data_reset |> group_by(donor) |> mutate(donorid=cur_group_id()) |> ungroup()
-  village$data <- village$data[village$data$donor == village$baseline,]
+  data_reset <- data_reset |>
+    group_by(donor) |>
+    mutate(donorid = cur_group_id()) |>
+    ungroup()
+
+  village$data <- village$data[village$data$donor == village$baseline, ]
   village$data$donorid <- village$num_donors
 
   village$data <- rbind(data_reset, village$data)
