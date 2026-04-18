@@ -355,7 +355,6 @@ baseline_donor <- function(village) {
 #' @exportS3Method baseline_donor Village
 baseline_donor.Village <- function(village) {
 
-  # Define donors with median growth (alternative baseline donors)
   df_meddonors <- village$data
 
   if (length(village$treatcol) == 1) {
@@ -421,6 +420,7 @@ baseline_donor.Village <- function(village) {
   if (is.null(village$baseline)) {
     village$baseline <- df_meddonors$donor[1]
   }
+
   data_reset <- village$data[village$data$donor != village$baseline, ]
   data_reset <- data_reset |>
     group_by(donor) |>
