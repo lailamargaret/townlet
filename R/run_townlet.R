@@ -200,15 +200,20 @@ model_inputs.Village <- function(village) {
   }
 
   # Check for replicate structure of T0 data
+  t0_mult <- village$num_timepts
+  if (length(village$treatcol) != 0) {
+    t0_mult <- t0_mult * village$num_doses
+  }
+
   if (nrow(village$T0) != village$num_reps) {
-    if (nrow(village$T0 == 1)) {
-      village$T0 <- village$T0[rep(1, times=village$num_reps*village$num_timepts),]
+    if (nrow(village$T0) == 1) {
+      village$T0 <- village$T0[rep(1, times = village$num_reps * t0_mult), , drop = FALSE]
       warning("Using the same T0 values for all replicates!")
     } else {
       stop("Incorrect number of samples in time 0 data")
     }
   } else {
-    village$T0 <- village$T0[rep(1:village$num_reps, times=village$num_timepts),]
+    village$T0 <- village$T0[rep(1:village$num_reps, times = t0_mult), , drop = FALSE]
   }
 
   ## N = total # samples (num_reps*num_doses*num_timepts--excluding T0)
@@ -224,8 +229,13 @@ model_inputs.Village <- function(village) {
 
   village$N = length(df$sample)
 
-  if(village$N != village$num_reps*(village$num_timepts)) {
-    stop(paste('Missing samples from data. Expecting:', village$num_reps*village$num_timepts, 'samples, only', village$N, 'samples present.'))
+  expected_N <- village$num_reps * village$num_timepts
+  if (length(village$treatcol) != 0) {
+    expected_N <- expected_N * village$num_doses
+  }
+
+  if(village$N != expected_N) {
+    stop(paste('Missing samples from data. Expecting:', expected_N, 'samples, only', village$N, 'samples present.'))
   }
   if(any(is.na(df[, !(names(df) %in% cols)]))) {
     na_rows <- which(rowSums(is.na(df[, !(names(df) %in% cols)])) > 0)
@@ -298,13 +308,28 @@ def_priors.Village <- function(village) {
       df <- village$data |> select(donor, time, replicate, representation)
       df$i <- 1
 
-      if(village$sim == FALSE & nrow(df[df$time ==0,]) != village$num_reps) {
-        df_0 <- dplyr::bind_rows(replicate(village$num_reps, df[df$time ==0,], simplify = FALSE))
-        df_0$replicate <- rep(1:village$num_reps, each = village$num_donors)
-        df <- df[df$time != 0,]
+      # if(village$sim == FALSE & nrow(df[df$time ==0,]) != village$num_reps) {
+      #   df_0 <- dplyr::bind_rows(replicate(village$num_reps, df[df$time ==0,], simplify = FALSE))
+      #   df_0$replicate <- rep(1:village$num_reps, each = village$num_donors)
+      #   df <- df[df$time != 0,]
+      #   df <- rbind(df, df_0)
+      #   df <- df[order(df$time),]
+      # }
+      t0 <- df[df$time == 0, , drop = FALSE]
+
+      t0_already_has_replicates <- (
+        nrow(t0) == village$num_donors * village$num_reps &&
+          length(unique(t0$replicate)) == village$num_reps
+      )
+
+      if (!village$sim && !t0_already_has_replicates) {
+        df_0 <- dplyr::bind_rows(replicate(village$num_reps, t0, simplify = FALSE))
+        df_0$replicate <- rep(1:village$num_reps, each = nrow(t0))
+        df <- df[df$time != 0, , drop = FALSE]
         df <- rbind(df, df_0)
-        df <- df[order(df$time),]
+        df <- df[order(df$time, df$replicate), ]
       }
+
 
       data <- df |>
         select(i, time, replicate, donor, representation) |>
